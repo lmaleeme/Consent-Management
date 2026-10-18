@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stay in touch</title>
+<!-- NewCo consent form T2.0. The ONLY per-client edit is ENDPOINT below. Everything else comes from the Config tab. -->
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--mut:#5f6368;--bd:#c9ced6;--ac:#1F3864;--err:#b42318}
+@media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#f2f2f2;--mut:#a0a4ab;--bd:#3a3d42;--err:#f97066}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:480px;margin:0 auto;padding:24px 16px}
+img{max-height:48px;max-width:100%;margin-bottom:12px}
+h1{font-size:22px;margin:0 0 6px}
+p{margin:0 0 14px}.mut{color:var(--mut);font-size:14px}
+label{display:block;font-weight:600;margin:14px 0 4px}
+input[type=text],input[type=email],input[type=tel],select,textarea{width:100%;box-sizing:border-box;padding:10px;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--bd);border-radius:8px}
+fieldset{border:0;padding:0;margin:18px 0 0}legend{font-weight:600;padding:0;margin-bottom:6px}
+.chk{display:flex;gap:10px;align-items:flex-start;font-weight:400;margin:8px 0}.chk input{margin-top:5px}
+button{margin-top:18px;width:100%;padding:12px;font:inherit;font-weight:600;color:#fff;background:var(--ac);border:0;border-radius:8px;cursor:pointer}
+button:disabled{opacity:.6}a{color:var(--ac)}
+@media (prefers-color-scheme:dark){a{color:#9db8ff}}
+#msg{margin-top:12px;font-weight:600}.err{color:var(--err)}
+.hp{position:absolute;left:-9999px;height:0;overflow:hidden}
+</style>
+</head>
+<body>
+<main id="app"><p class="mut">Loading…</p></main>
+<script>
+const ENDPOINT = 'PASTE_WEB_APP_URL_HERE';
+
+const el = (t, p, ...kids) => { const e = document.createElement(t); Object.assign(e, p || {}); kids.forEach(k => e.append(k)); return e; };
+const params = new URLSearchParams(location.search);
+const app = document.getElementById('app');
+let cfg;
+
+async function load() {
+  try { cfg = await (await fetch(ENDPOINT + '?a=config')).json(); } catch (e) { cfg = { ok: false }; }
+  if (!cfg.ok) return app.replaceChildren(el('p', { textContent: 'This form isn’t available right now.' }));
+  render();
+}
+
+function render() {
+  const s = cfg.settings, startedAt = Date.now();
+  document.documentElement.lang = s.language || 'en';
+  document.title = s.form_title;
+  if (/^#[0-9a-f]{3,8}$/i.test(s.brand_color)) document.documentElement.style.setProperty('--ac', s.brand_color);
+
+  const form = el('form', { noValidate: false });
+  if (/^https:\/\//i.test(s.logo_url)) form.append(el('img', { src: s.logo_url, alt: s.client_name }));
+  form.append(el('h1', { textContent: s.form_title }), el('p', { textContent: s.intro_text }));
+
+  cfg.fields.forEach(f => {
+    const id = 'f_' + f.field_id;
+    let input;
+    if (f.type === 'textarea') input = el('textarea', { rows: 4 });
+    else if (f.type === 'select') {
+      input = el('select', {}, el('option', { value: '', textContent: 'Select…' }),
+        ...String(f.options).split(';').map(o => el('option', { value: o, textContent: o })));
+    } else input = el('input', { type: ['email', 'tel'].includes(f.type) ? f.type : 'text' });
+    Object.assign(input, { id, name: id, required: f.required });
+    form.append(el('label', { htmlFor: id, textContent: f.label + (f.required ? '' : ' (optional)') }), input);
+    if (f.help_text) form.append(el('div', { className: 'mut', textContent: f.help_text }));
+  });
+
+  // notice: what we use the details for (service purposes), and who is responsible
+  const usedBy = new Set(cfg.fields.map(f => f.purpose_id));
+  const notice = cfg.purposes.filter(p => p.type === 'service' && usedBy.has(p.purpose_id)).map(p => p.wording).join(' ');
+  form.append(el('p', { className: 'mut', style: 'margin-top:16px' }, notice + ' ' + s.responsible_party_legal_name + ' is responsible for your information. ',
+    /^https:\/\//i.test(s.privacy_notice_url) ? el('a', { href: s.privacy_notice_url, target: '_blank', rel: 'noopener', textContent: 'Privacy notice' }) : ''));
+
+  // consent boxes: never pre-ticked, always optional
+  const consents = cfg.purposes.filter(p => p.type === 'consent');
+  if (consents.length) {
+    const fs = el('fieldset', {}, el('legend', { textContent: 'Optional: I would like to' }));
+    consents.forEach(p => fs.append(el('label', { className: 'chk' },
+      el('input', { type: 'checkbox', name: 'c_' + p.purpose_id }), el('span', { textContent: p.wording }))));
+    form.append(fs);
+  }
+  if (s.require_18_plus === 'Y') form.append(el('label', { className: 'chk' },
+    el('input', { type: 'checkbox', name: 'age', required: true }), el('span', { textContent: 'I am 18 or older' })));
+
+  form.append(el('div', { className: 'hp', ariaHidden: 'true' }, el('input', { type: 'text', name: 'website', tabIndex: -1, autocomplete: 'off' })));
+  const btn = el('button', { type: 'submit', textContent: 'Submit' });
+  const msg = el('div', { id: 'msg', role: 'status' });
+  form.append(btn, msg);
+
+  const ERR = { email: 'Please check your email address.', age: 'You need to confirm you are 18 or older.',
+    channel_data: 'Please add the phone or WhatsApp number for the channels you ticked.',
+    busy: 'Too many attempts. Please try again in a few minutes.', stale: 'This form was just updated. Please review it and submit again.' };
+
+  form.onsubmit = async ev => {
+    ev.preventDefault();
+    btn.disabled = true; msg.className = ''; msg.textContent = '';
+    const fields = {};
+    cfg.fields.forEach(f => { fields[f.field_id] = form.elements['f_' + f.field_id].value; });
+    const body = {
+      fields, config_version: cfg.version, t: startedAt, hp: form.elements.website.value,
+      consents: consents.filter(p => form.elements['c_' + p.purpose_id].checked).map(p => p.purpose_id),
+      age_ok: form.elements.age ? form.elements.age.checked : false,
+      source: params.get('s') || '', page_url: location.href, referrer: document.referrer,
+    };
+    const res = await fetch(ENDPOINT, { method: 'POST', body: JSON.stringify(body) }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
+    if (res.ok) { app.replaceChildren(el('p', { textContent: res.message || 'Thanks.' })); return; }
+    msg.className = 'err';
+    msg.textContent = ERR[res.error] || (String(res.error).startsWith('missing:') ? 'Please fill in the required fields.' : 'Something went wrong. Please try again.');
+    btn.disabled = false;
+    if (res.error === 'stale') load();
+  };
+  app.replaceChildren(form);
+}
+load();
+</script>
+</body>
+</html>
