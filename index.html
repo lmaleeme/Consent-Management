@@ -39,7 +39,7 @@ let cfg;
 async function load() {
   try { cfg = await (await fetch(ENDPOINT + '?a=config')).json(); } catch (e) { cfg = { ok: false }; }
   if (!cfg.ok) return app.replaceChildren(el('p', { textContent: 'This form isn’t available right now.' }));
-  render();
+  params.get('p') === 'data' ? renderData() : render();
 }
 
 function render() {
@@ -85,7 +85,7 @@ function render() {
   form.append(el('div', { className: 'hp', ariaHidden: 'true' }, el('input', { type: 'text', name: 'website', tabIndex: -1, autocomplete: 'off' })));
   const btn = el('button', { type: 'submit', textContent: 'Submit' });
   const msg = el('div', { id: 'msg', role: 'status' });
-  form.append(btn, msg);
+  form.append(btn, msg, el('p', { className: 'mut', style: 'margin-top:16px' }, el('a', { href: '?p=data', textContent: 'Download my data' })));
 
   const ERR = { email: 'Please check your email address.', age: 'You need to confirm you are 18 or older.',
     channel_data: 'Please add the phone or WhatsApp number for the channels you ticked.',
@@ -111,6 +111,37 @@ function render() {
   };
   app.replaceChildren(form);
 }
+
+function renderData() {
+  const s = cfg.settings, startedAt = Date.now();
+  document.title = 'Download my data';
+  if (/^#[0-9a-f]{3,8}$/i.test(s.brand_color)) document.documentElement.style.setProperty('--ac', s.brand_color);
+  const form = el('form');
+  if (/^https:\/\//i.test(s.logo_url)) form.append(el('img', { src: s.logo_url, alt: s.client_name }));
+  const input = el('input', { type: 'email', id: 'em', name: 'em', required: true, autocomplete: 'email' });
+  const btn = el('button', { type: 'submit', textContent: 'Email me the link' });
+  const msg = el('div', { id: 'msg', role: 'status' });
+  form.append(el('h1', { textContent: 'Download my data' }),
+    el('p', { textContent: 'Enter the email address you signed up with. We will email you a secure link to download the information we hold about you. The link works for one hour.' }),
+    el('label', { htmlFor: 'em', textContent: 'Email' }), input,
+    el('div', { className: 'hp', ariaHidden: 'true' }, el('input', { type: 'text', name: 'website', tabIndex: -1, autocomplete: 'off' })),
+    btn, msg,
+    el('p', { className: 'mut', style: 'margin-top:16px' }, 'To correct or delete your data, contact ' + s.request_contact_email + '.'));
+  form.onsubmit = async ev => {
+    ev.preventDefault();
+    btn.disabled = true; msg.className = ''; msg.textContent = '';
+    const res = await fetch(ENDPOINT, { method: 'POST', body: JSON.stringify({
+      action: 'mydata', fields: { email: input.value }, t: startedAt, hp: form.elements.website.value }) })
+      .then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
+    if (res.ok) { app.replaceChildren(el('p', { textContent: res.message || 'Thanks.' })); return; }
+    msg.className = 'err';
+    msg.textContent = res.error === 'email' ? 'Please check your email address.' :
+      res.error === 'busy' ? 'Too many attempts. Please try again in a few minutes.' : 'Something went wrong. Please try again.';
+    btn.disabled = false;
+  };
+  app.replaceChildren(form);
+}
+
 load();
 </script>
 </body>
