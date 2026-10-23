@@ -129,15 +129,17 @@ function renderData() {
     el('p', { className: 'mut', style: 'margin-top:16px' }, 'To correct or delete your data, contact ' + s.request_contact_email + '.'));
   form.onsubmit = async ev => {
     ev.preventDefault();
-    btn.disabled = true; msg.className = ''; msg.textContent = '';
-    const res = await fetch(ENDPOINT, { method: 'POST', body: JSON.stringify({
+    btn.disabled = true; btn.textContent = 'Sending…'; msg.className = ''; msg.textContent = '';
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 30000);
+    const res = await fetch(ENDPOINT, { method: 'POST', signal: ctl.signal, body: JSON.stringify({
       action: 'mydata', fields: { email: input.value }, t: startedAt, hp: form.elements.website.value }) })
       .then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
+    clearTimeout(timer);
     if (res.ok) { app.replaceChildren(el('p', { textContent: res.message || 'Thanks.' })); return; }
     msg.className = 'err';
     msg.textContent = res.error === 'email' ? 'Please check your email address.' :
       res.error === 'busy' ? 'Too many attempts. Please try again in a few minutes.' : 'Something went wrong. Please try again.';
-    btn.disabled = false;
+    btn.disabled = false; btn.textContent = 'Email me the link';
   };
   app.replaceChildren(form);
 }
