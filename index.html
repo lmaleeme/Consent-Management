@@ -158,7 +158,7 @@ function renderRequest() {
   const btn = el('button', { type: 'submit', textContent: 'Email me a confirmation link' });
   const msg = el('div', { id: 'msg', role: 'status' });
   form.append(el('h1', { textContent: 'Correct or delete my data' }),
-    el('p', { textContent: 'Tell us what you need. We will email a link to the address we hold, so we know it is you. Once you confirm, ' + s.responsible_party_legal_name + ' will respond.' }),
+    el('p', { textContent: 'Tell us what you need. We will email a link to the address we hold, so we know it is you. Once you confirm, ' + s.responsible_party_legal_name + ' takes it from there.' }),
     el('fieldset', {}, el('legend', { textContent: 'I want to' }), radio('correct', 'Correct my details', true), radio('delete', 'Delete my data', false)),
     detLabel, det, warn,
     el('label', { htmlFor: 'em', textContent: 'Email' }), input,
@@ -170,7 +170,7 @@ function renderRequest() {
     const del = form.elements.rtype.value === 'delete';
     detLabel.textContent = del ? 'Anything you want us to know (optional)' : 'What should be corrected?';
     det.required = !del;
-    warn.textContent = del ? 'Deleting your data also removes you from our mailing lists. We may keep minimal records if the law requires it.' : '';
+    warn.textContent = del ? 'We will email you a copy of your data and ask you to confirm. Nothing is deleted until you do. Deleting also removes you from our mailing lists. We may keep minimal records if the law requires it.' : '';
   };
   form.addEventListener('change', sync);
   sync();
