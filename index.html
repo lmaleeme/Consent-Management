@@ -3,10 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="preconnect" href="https://script.google.com">
-<link rel="preconnect" href="https://script.googleusercontent.com">
 <title>Stay in touch</title>
-<!-- NewCo consent form T2.1. The ONLY per-client edit is ENDPOINT below. Everything else comes from the Config tab. -->
+<!-- NewCo consent form T3.0. One copy serves every client: set ENDPOINT once, then open the page as ?t=<client-slug>. Everything else comes from the database. -->
 <style>
 :root{--bg:#fff;--fg:#1a1a1a;--mut:#5f6368;--bd:#c9ced6;--ac:#1F3864;--err:#b42318}
 @media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#f2f2f2;--mut:#a0a4ab;--bd:#3a3d42;--err:#f97066}}
@@ -34,7 +32,8 @@ td input[type=text],td select,td textarea{margin:0}
 <body>
 <main id="app"><p class="mut">Loading…</p></main>
 <script>
-const ENDPOINT = 'https://script.google.com/macros/s/AKfycbwilKUwXeHoSVOLXbEA7CZcQWqMUuthSbXloNbdSMgTeW_-AE5JhjAChmy8eeUmx3OW/exec';
+const ENDPOINT = 'https://huirphsvtugedvcqjdlp.supabase.co/functions/v1/api';       // https://<project-ref>.supabase.co/functions/v1/api
+const TENANT = new URLSearchParams(location.search).get('t') || '';
 
 const el = (t, p, ...kids) => { const e = document.createElement(t); Object.assign(e, p || {}); kids.forEach(k => e.append(k)); return e; };
 const params = new URLSearchParams(location.search);
@@ -42,9 +41,9 @@ const app = document.getElementById('app');
 let cfg;
 
 async function load() {
-  try { cfg = await (await fetch(ENDPOINT + '?a=config')).json(); } catch (e) { cfg = { ok: false }; }
+  try { cfg = await (await fetch(ENDPOINT + '?tenant=' + encodeURIComponent(TENANT) + '&a=config')).json(); } catch (e) { cfg = { ok: false }; }
   if (!cfg.ok) return app.replaceChildren(el('p', { textContent: 'This form isn’t available right now.' }));
-  params.get('p') === 'data' ? renderData() : params.get('p') === 'request' ? renderRequest() : params.get('p') === 'correct' ? renderCorrect() : render();
+  params.get('p') === 'data' ? renderData() : params.get('p') === 'request' ? renderRequest() : params.get('p') === 'correct' ? renderCorrect() : params.get('p') === 'choices' ? renderChoices() : render();
 }
 
 function render() {
@@ -90,7 +89,7 @@ function render() {
   form.append(el('div', { className: 'hp', ariaHidden: 'true' }, el('input', { type: 'text', name: 'website', tabIndex: -1, autocomplete: 'off' })));
   const btn = el('button', { type: 'submit', textContent: 'Submit' });
   const msg = el('div', { id: 'msg', role: 'status' });
-  form.append(btn, msg, el('p', { className: 'mut', style: 'margin-top:16px' }, el('a', { href: '?p=data', textContent: 'Download my data' }), ' · ', el('a', { href: '?p=request', textContent: 'Correct or delete my data' })));
+  form.append(btn, msg, el('p', { className: 'mut', style: 'margin-top:16px' }, el('a', { href: '?t=' + encodeURIComponent(TENANT) + '&p=data', textContent: 'Download my data' }), ' · ', el('a', { href: '?t=' + encodeURIComponent(TENANT) + '&p=request', textContent: 'Correct or delete my data' })));
 
   const ERR = { email: 'Please check your email address.', age: 'You need to confirm you are 18 or older.',
     channel_data: 'Please add the phone or WhatsApp number for the channels you ticked.',
@@ -107,7 +106,7 @@ function render() {
       age_ok: form.elements.age ? form.elements.age.checked : false,
       source: params.get('s') || '', page_url: location.href, referrer: document.referrer,
     };
-    const res = await fetch(ENDPOINT, { method: 'POST', body: JSON.stringify(body) }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
+    const res = await fetch(ENDPOINT, { method: 'POST', body: JSON.stringify(Object.assign({ tenant: TENANT }, body)) }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
     if (res.ok) { app.replaceChildren(el('p', { textContent: res.message || 'Thanks.' })); return; }
     msg.className = 'err';
     msg.textContent = ERR[res.error] || (String(res.error).startsWith('missing:') ? 'Please fill in the required fields.' : 'Something went wrong. Please try again.');
@@ -131,13 +130,13 @@ function renderData() {
     el('label', { htmlFor: 'em', textContent: 'Email' }), input,
     el('div', { className: 'hp', ariaHidden: 'true' }, el('input', { type: 'text', name: 'website', tabIndex: -1, autocomplete: 'off' })),
     btn, msg,
-    el('p', { className: 'mut', style: 'margin-top:16px' }, 'Want to correct or delete your data? ', el('a', { href: '?p=request', textContent: 'Make a request' }), '.'));
+    el('p', { className: 'mut', style: 'margin-top:16px' }, 'Want to correct or delete your data? ', el('a', { href: '?t=' + encodeURIComponent(TENANT) + '&p=request', textContent: 'Make a request' }), '.'));
   form.onsubmit = async ev => {
     ev.preventDefault();
     btn.disabled = true; btn.textContent = 'Sending…'; msg.className = ''; msg.textContent = '';
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 30000);
     const res = await fetch(ENDPOINT, { method: 'POST', signal: ctl.signal, body: JSON.stringify({
-      action: 'mydata', fields: { email: input.value }, t: startedAt, hp: form.elements.website.value }) })
+      tenant: TENANT, action: 'mydata', fields: { email: input.value }, t: startedAt, hp: form.elements.website.value }) })
       .then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
     clearTimeout(timer);
     if (res.ok) { app.replaceChildren(el('p', { textContent: res.message || 'Thanks.' })); return; }
@@ -167,7 +166,7 @@ function renderRequest() {
     el('label', { htmlFor: 'em', textContent: 'Email' }), input,
     el('div', { className: 'hp', ariaHidden: 'true' }, el('input', { type: 'text', name: 'website', tabIndex: -1, autocomplete: 'off' })),
     btn, msg,
-    el('p', { className: 'mut', style: 'margin-top:16px' }, 'Want a copy of your data first? ', el('a', { href: '?p=data', textContent: 'Download my data' }),
+    el('p', { className: 'mut', style: 'margin-top:16px' }, 'Want a copy of your data first? ', el('a', { href: '?t=' + encodeURIComponent(TENANT) + '&p=data', textContent: 'Download my data' }),
       '. To stop marketing, use the unsubscribe link in any email. Anything else: ' + s.request_contact_email + '.'));
   const sync = () => {
     warn.textContent = form.elements.rtype.value === 'delete'
@@ -181,7 +180,7 @@ function renderRequest() {
     btn.disabled = true; btn.textContent = 'Sending…'; msg.className = ''; msg.textContent = '';
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 30000);
     const res = await fetch(ENDPOINT, { method: 'POST', signal: ctl.signal, body: JSON.stringify({
-      action: 'request', type: form.elements.rtype.value, fields: { email: input.value },
+      tenant: TENANT, action: 'request', type: form.elements.rtype.value, fields: { email: input.value },
       t: startedAt, hp: form.elements.website.value }) })
       .then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
     clearTimeout(timer);
@@ -195,6 +194,43 @@ function renderRequest() {
   app.replaceChildren(form);
 }
 
+async function renderChoices() {                          // opened from the Unsubscribe link in every email
+  const s = cfg.settings;
+  document.title = 'Your choices';
+  if (/^#[0-9a-f]{3,8}$/i.test(s.brand_color)) document.documentElement.style.setProperty('--ac', s.brand_color);
+  const u = params.get('u') || '', k = params.get('k') || '';
+  const say = t => app.replaceChildren(el('p', { textContent: t }));
+  const fetchChoices = () => fetch(ENDPOINT + '?tenant=' + encodeURIComponent(TENANT) + '&a=choices&u=' + encodeURIComponent(u) + '&k=' + encodeURIComponent(k))
+    .then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
+  const data = await fetchChoices();
+  if (!data.ok) { say(data.error === 'network' ? 'Something went wrong. Please try again.' : 'This link is invalid or has expired.'); return; }
+  const msg = el('div', { id: 'msg', role: 'status' });
+  const draw = (list, note) => {
+    const active = list.filter(c => c.status !== 'Withdrawn');
+    const rows = list.map(c => el('tr', {}, el('th', { textContent: c.purpose }),
+      el('td', { textContent: c.status === 'Withdrawn' ? 'Withdrawn' : 'Active' }),
+      el('td', {}, c.status === 'Withdrawn' ? '' : el('button', { type: 'button', textContent: 'Withdraw', style: 'width:auto;margin:0;padding:6px 12px',
+        onclick: () => act([c.purpose_id]) }))));
+    const all = active.length ? el('button', { type: 'button', textContent: 'Unsubscribe from everything', onclick: () => act('ALL') }) : '';
+    app.replaceChildren(el('h1', { textContent: 'Your choices' }),
+      el('p', { textContent: list.length ? 'These are your current choices with ' + data.client_name + '.' : 'You have no marketing choices on record with ' + data.client_name + '.' }),
+      note ? el('p', { textContent: note }) : '',
+      list.length ? el('div', { className: 'wrap' }, el('table', {}, el('tbody', {}, ...rows))) : '',
+      all, msg,
+      el('p', { className: 'mut', style: 'margin-top:16px' }, el('a', { href: '?t=' + encodeURIComponent(TENANT) + '&p=data', textContent: 'Download my data' }), ' · ',
+        el('a', { href: '?t=' + encodeURIComponent(TENANT) + '&p=request', textContent: 'Correct or delete my data' })));
+  };
+  const act = async purposes => {
+    [...app.querySelectorAll('button')].forEach(b => { b.disabled = true; });
+    const res = await fetch(ENDPOINT, { method: 'POST', body: JSON.stringify({ tenant: TENANT, action: 'withdraw', u: u, k: k, purposes: purposes }) })
+      .then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
+    if (res.ok) { draw(res.choices, 'Done. Your choices are updated.'); return; }
+    draw(data.choices, ''); msg.className = 'err';
+    msg.textContent = res.error === 'busy' ? 'Too many attempts. Please try again later.' : 'Something went wrong. Please try again.';
+  };
+  draw(data.choices, '');
+}
+
 async function renderCorrect() {
   const s = cfg.settings;
   document.title = 'Correct my details';
@@ -202,7 +238,7 @@ async function renderCorrect() {
   const say = t => app.replaceChildren(el('p', { textContent: t }));
   const r = params.get('r') || '', x = params.get('x') || '', sg = params.get('s') || '';
   say('Loading your details…');
-  const data = await fetch(ENDPOINT + '?a=reqdata&p=' + encodeURIComponent(r) + '&x=' + encodeURIComponent(x) + '&s=' + encodeURIComponent(sg))
+  const data = await fetch(ENDPOINT + '?tenant=' + encodeURIComponent(TENANT) + '&a=reqdata&p=' + encodeURIComponent(r) + '&x=' + encodeURIComponent(x) + '&s=' + encodeURIComponent(sg))
     .then(res => res.json()).catch(() => ({ ok: false, error: 'network' }));
   if (!data.ok) {
     say(data.error === 'used' ? 'This request has already been completed.' :
@@ -270,7 +306,7 @@ async function renderCorrect() {
     btn.disabled = true; btn.textContent = 'Saving…'; msg.className = ''; msg.textContent = '';
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 30000);
     const res = await fetch(ENDPOINT, { method: 'POST', signal: ctl.signal, body: JSON.stringify({
-      action: 'correct', r: r, x: x, s: sg, fields: changed, consents: cons, t: startedAt - 5000, hp: '' }) })
+      tenant: TENANT, action: 'correct', r: r, x: x, s: sg, fields: changed, consents: cons, t: startedAt - 5000, hp: '' }) })
       .then(rr => rr.json()).catch(() => ({ ok: false, error: 'network' }));
     clearTimeout(timer);
     if (res.ok) {
