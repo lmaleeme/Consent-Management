@@ -24,6 +24,11 @@ button:disabled{opacity:.6}a{color:var(--ac)}
 @media (prefers-color-scheme:dark){a{color:#9db8ff}}
 #msg{margin-top:12px;font-weight:600}.err{color:var(--err)}
 .hp{position:absolute;left:-9999px;height:0;overflow:hidden}
+h2{font-size:17px;margin:18px 0 6px}[hidden]{display:none!important}
+.tabs{display:flex;gap:8px;margin:16px 0 8px}.tabs button{margin:0;flex:1;width:auto;color:var(--fg);background:transparent;border:1px solid var(--bd)}
+.tabs button[aria-selected=true]{color:#fff;background:var(--ac);border-color:var(--ac)}
+.wrap{overflow-x:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--bd);vertical-align:top;font-size:15px}th{font-weight:600;width:42%}
+td input[type=text],td select,td textarea{margin:0}
 </style>
 </head>
 <body>
@@ -39,7 +44,7 @@ let cfg;
 async function load() {
   try { cfg = await (await fetch(ENDPOINT + '?a=config')).json(); } catch (e) { cfg = { ok: false }; }
   if (!cfg.ok) return app.replaceChildren(el('p', { textContent: 'This form isn’t available right now.' }));
-  params.get('p') === 'data' ? renderData() : params.get('p') === 'request' ? renderRequest() : render();
+  params.get('p') === 'data' ? renderData() : params.get('p') === 'request' ? renderRequest() : params.get('p') === 'correct' ? renderCorrect() : render();
 }
 
 function render() {
@@ -152,25 +157,22 @@ function renderRequest() {
   if (/^https:\/\//i.test(s.logo_url)) form.append(el('img', { src: s.logo_url, alt: s.client_name }));
   const radio = (v, t, on) => el('label', { className: 'chk' }, el('input', { type: 'radio', name: 'rtype', value: v, checked: on }), el('span', { textContent: t }));
   const input = el('input', { type: 'email', id: 'em', name: 'em', required: true, autocomplete: 'email' });
-  const detLabel = el('label', { htmlFor: 'det' });
-  const det = el('textarea', { id: 'det', name: 'det', rows: 4, maxLength: 1000 });
   const warn = el('p', { className: 'mut' });
   const btn = el('button', { type: 'submit', textContent: 'Email me a confirmation link' });
   const msg = el('div', { id: 'msg', role: 'status' });
   form.append(el('h1', { textContent: 'Correct or delete my data' }),
     el('p', { textContent: 'Tell us what you need. We will email a link to the address we hold, so we know it is you. Once you confirm, ' + s.responsible_party_legal_name + ' takes it from there.' }),
     el('fieldset', {}, el('legend', { textContent: 'I want to' }), radio('correct', 'Correct my details', true), radio('delete', 'Delete my data', false)),
-    detLabel, det, warn,
+    warn,
     el('label', { htmlFor: 'em', textContent: 'Email' }), input,
     el('div', { className: 'hp', ariaHidden: 'true' }, el('input', { type: 'text', name: 'website', tabIndex: -1, autocomplete: 'off' })),
     btn, msg,
     el('p', { className: 'mut', style: 'margin-top:16px' }, 'Want a copy of your data first? ', el('a', { href: '?p=data', textContent: 'Download my data' }),
       '. To stop marketing, use the unsubscribe link in any email. Anything else: ' + s.request_contact_email + '.'));
   const sync = () => {
-    const del = form.elements.rtype.value === 'delete';
-    detLabel.textContent = del ? 'Anything you want us to know (optional)' : 'What should be corrected?';
-    det.required = !del;
-    warn.textContent = del ? 'We will email you a copy of your data and ask you to confirm. Nothing is deleted until you do. Deleting also removes you from our mailing lists. We may keep minimal records if the law requires it.' : '';
+    warn.textContent = form.elements.rtype.value === 'delete'
+      ? 'We will email you a copy of your data and ask you to confirm. Nothing is deleted until you do. Deleting also removes you from our mailing lists. We may keep minimal records if the law requires it.'
+      : 'We will email you a link. You will see what we hold and can change it yourself.';
   };
   form.addEventListener('change', sync);
   sync();
@@ -179,18 +181,113 @@ function renderRequest() {
     btn.disabled = true; btn.textContent = 'Sending…'; msg.className = ''; msg.textContent = '';
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 30000);
     const res = await fetch(ENDPOINT, { method: 'POST', signal: ctl.signal, body: JSON.stringify({
-      action: 'request', type: form.elements.rtype.value, details: det.value, fields: { email: input.value },
+      action: 'request', type: form.elements.rtype.value, fields: { email: input.value },
       t: startedAt, hp: form.elements.website.value }) })
       .then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
     clearTimeout(timer);
     if (res.ok) { app.replaceChildren(el('p', { textContent: res.message || 'Thanks.' })); return; }
     msg.className = 'err';
     msg.textContent = res.error === 'email' ? 'Please check your email address.' :
-      res.error === 'details' ? 'Please tell us what should be corrected.' :
+      res.error === 'setup' ? 'This is not fully set up yet. Please contact ' + s.request_contact_email + '.' :
       res.error === 'busy' ? 'Too many attempts. Please try again in a few minutes.' : 'Something went wrong. Please try again.';
     btn.disabled = false; btn.textContent = 'Email me a confirmation link';
   };
   app.replaceChildren(form);
+}
+
+async function renderCorrect() {
+  const s = cfg.settings;
+  document.title = 'Correct my details';
+  if (/^#[0-9a-f]{3,8}$/i.test(s.brand_color)) document.documentElement.style.setProperty('--ac', s.brand_color);
+  const say = t => app.replaceChildren(el('p', { textContent: t }));
+  const r = params.get('r') || '', x = params.get('x') || '', sg = params.get('s') || '';
+  say('Loading your details…');
+  const data = await fetch(ENDPOINT + '?a=reqdata&p=' + encodeURIComponent(r) + '&x=' + encodeURIComponent(x) + '&s=' + encodeURIComponent(sg))
+    .then(res => res.json()).catch(() => ({ ok: false, error: 'network' }));
+  if (!data.ok) {
+    say(data.error === 'used' ? 'This request has already been completed.' :
+      data.error === 'expired' ? 'This link is invalid or has expired. Please make your request again.' :
+      'Something went wrong. Please try again.');
+    return;
+  }
+  const row = (a, b) => el('tr', {}, el('th', { textContent: a }), typeof b === 'string' ? el('td', { textContent: b || '—' }) : el('td', {}, b));
+  const table = rows => el('div', { className: 'wrap' }, el('table', {}, el('tbody', {}, ...rows)));
+  const wrap = el('div');
+  if (/^https:\/\//i.test(s.logo_url)) wrap.append(el('img', { src: s.logo_url, alt: s.client_name }));
+
+  const view = el('div');
+  view.append(el('h2', { textContent: 'What we hold about you' }),
+    table(data.fields.map(f => row(f.label, f.value)).concat(data.held.map(h => row(h.label, h.value)))),
+    el('h2', { textContent: 'Your choices' }),
+    table(data.consents.map(c => row(c.purpose, c.active ? 'Active' : 'Not active'))),
+    el('p', { className: 'mut', style: 'margin-top:14px', textContent: 'Email, phone and WhatsApp cannot be changed here. They are how we confirm it is you and reach you. To change them, contact ' + s.request_contact_email + '.' }));
+
+  const form = el('form');
+  const inputs = data.fields.map(f => {
+    let input;
+    if (f.type === 'textarea') input = el('textarea', { rows: 3, value: f.value });
+    else if (f.type === 'select') {
+      input = el('select', {}, el('option', { value: '', textContent: 'Select…' }), ...f.options.map(o => el('option', { value: o, textContent: o })));
+      input.value = f.value;
+    } else input = el('input', { type: 'text', value: f.value });
+    input.setAttribute('aria-label', f.label);
+    return { f, input };
+  });
+  const boxes = data.consents.map(c => {
+    const box = el('input', { type: 'checkbox', checked: c.active, disabled: !c.active && !c.can_grant });
+    const note = !c.active && !c.can_grant ? ' (We do not hold the details for this. Contact ' + s.request_contact_email + '.)' : '';
+    return { c, box, node: el('label', { className: 'chk' }, box, el('span', { textContent: (c.wording || c.purpose) + note })) };
+  });
+  const btn = el('button', { type: 'submit', textContent: 'Submit changes' });
+  const msg = el('div', { id: 'msg', role: 'status' });
+  form.append(el('p', { className: 'mut', textContent: 'Change anything that is wrong and leave the rest. Only what you change is updated.' }),
+    table(inputs.map(({ f, input }) => row(f.label + (f.required ? ' *' : ''), input))),
+    el('h2', { textContent: 'Your choices' }), ...boxes.map(b => b.node), btn, msg);
+
+  const t1 = el('button', { type: 'button', textContent: 'Existing data' });
+  const t2 = el('button', { type: 'button', textContent: 'Amendments' });
+  const show = n => {
+    view.hidden = n !== 1; form.hidden = n !== 2;
+    t1.setAttribute('aria-selected', String(n === 1)); t2.setAttribute('aria-selected', String(n === 2));
+  };
+  t1.onclick = () => show(1); t2.onclick = () => show(2);
+  wrap.append(el('h1', { textContent: 'Correct my details' }), el('div', { className: 'tabs', role: 'tablist' }, t1, t2), view, form);
+  show(1);
+
+  const startedAt = Date.now();
+  form.onsubmit = async ev => {
+    ev.preventDefault();
+    msg.className = 'err'; msg.textContent = '';
+    const changed = {};
+    for (const { f, input } of inputs) {
+      const v = input.value.trim();
+      if (f.required && !v) { msg.textContent = 'Please fill in: ' + f.label + '.'; return; }
+      if (v !== f.value) changed[f.field_id] = v;
+    }
+    const cons = {};
+    boxes.forEach(b => { if (b.box.checked !== b.c.active) cons[b.c.purpose_id] = b.box.checked; });
+    if (!Object.keys(changed).length && !Object.keys(cons).length) { msg.textContent = 'Nothing has changed yet.'; return; }
+    btn.disabled = true; btn.textContent = 'Saving…'; msg.className = ''; msg.textContent = '';
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 30000);
+    const res = await fetch(ENDPOINT, { method: 'POST', signal: ctl.signal, body: JSON.stringify({
+      action: 'correct', r: r, x: x, s: sg, fields: changed, consents: cons, t: startedAt - 5000, hp: '' }) })
+      .then(rr => rr.json()).catch(() => ({ ok: false, error: 'network' }));
+    clearTimeout(timer);
+    if (res.ok) {
+      app.replaceChildren(el('h1', { textContent: 'Details updated' }), el('p', { textContent: res.message || 'Thanks.' }),
+        ...(res.changed || []).map(c => el('p', { className: 'mut', textContent: c })));
+      return;
+    }
+    msg.className = 'err';
+    msg.textContent = res.error === 'expired' ? 'This link has expired. Please make your request again.' :
+      res.error === 'used' ? 'This request has already been completed.' :
+      String(res.error).startsWith('missing') ? 'Please fill in the required details.' :
+      res.error === 'bad_option' ? 'Please pick one of the options.' :
+      res.error === 'channel_data' ? 'We do not hold the details for that choice. Contact ' + s.request_contact_email + '.' :
+      res.error === 'busy' ? 'Too many attempts. Please try again in a few minutes.' : 'Something went wrong. Please try again.';
+    btn.disabled = false; btn.textContent = 'Submit changes';
+  };
+  app.replaceChildren(wrap);
 }
 
 load();
