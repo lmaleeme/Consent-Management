@@ -43,7 +43,7 @@ let cfg;
 async function load() {
   try { cfg = await (await fetch(ENDPOINT + '?tenant=' + encodeURIComponent(TENANT) + '&a=config')).json(); } catch (e) { cfg = { ok: false }; }
   if (!cfg.ok) return app.replaceChildren(el('p', { textContent: 'This form isn’t available right now.' }));
-  params.get('p') === 'data' ? renderData() : params.get('p') === 'request' ? renderRequest() : params.get('p') === 'correct' ? renderCorrect() : params.get('p') === 'choices' ? renderChoices() : render();
+  params.get('p') === 'data' ? renderData() : params.get('p') === 'request' ? renderRequest() : params.get('p') === 'correct' ? renderCorrect() : params.get('p') === 'choices' ? renderChoices() : params.get('p') === 'download' ? renderDownload() : params.get('p') === 'delete' ? renderDelete() : render();
 }
 
 function render() {
@@ -192,6 +192,63 @@ function renderRequest() {
     btn.disabled = false; btn.textContent = 'Email me a confirmation link';
   };
   app.replaceChildren(form);
+}
+
+async function renderDownload() {                          // opened from the one-hour link in the download email
+  const s = cfg.settings;
+  document.title = 'Download my data';
+  if (/^#[0-9a-f]{3,8}$/i.test(s.brand_color)) document.documentElement.style.setProperty('--ac', s.brand_color);
+  const say = t => app.replaceChildren(el('p', { textContent: t }));
+  const enc = encodeURIComponent;
+  say('Loading…');
+  const data = await fetch(ENDPOINT + '?tenant=' + enc(TENANT) + '&a=export&u=' + enc(params.get('u') || '') + '&x=' + enc(params.get('x') || '') + '&s=' + enc(params.get('s') || ''))
+    .then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
+  if (!data.ok) { say(data.error === 'network' ? 'Something went wrong. Please try again.' : 'This link is invalid or has expired. Please ask for a new one.'); return; }
+  const table = rows => el('div', { className: 'wrap' }, el('table', {}, el('tbody', {}, ...rows)));
+  const row = (a, b) => el('tr', {}, el('th', { textContent: a }), el('td', { textContent: b || '—' }));
+  const cell = v => { let t = String(v == null ? '' : v); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return '"' + t.replace(/"/g, '""') + '"'; };   // spreadsheet-formula safe
+  const day = c => String(c.last_changed || '').slice(0, 10);
+  const csv = ['Your details', 'item,value'].concat(data.details.map(d => cell(d.label) + ',' + cell(d.value)),
+    ['', 'Your consent choices', 'purpose,status,last changed'], data.choices.map(c => [c.purpose, c.status, day(c)].map(cell).join(','))).join('\r\n');
+  const btn = el('button', { type: 'button', textContent: 'Download as CSV', onclick: () => {
+    const a = el('a', { href: 'data:text/csv;charset=utf-8,' + enc('\ufeff' + csv), download: 'my-data.csv' });
+    document.body.append(a); a.click(); a.remove(); } });
+  app.replaceChildren(el('h1', { textContent: 'Your data' }),
+    el('p', { textContent: 'This is what ' + data.client_name + ' holds about you.' }),
+    el('h2', { textContent: 'Your details' }), table(data.details.map(d => row(d.label, d.value))),
+    el('h2', { textContent: 'Your choices' }), table(data.choices.map(c => row(c.purpose, c.status + (day(c) ? ' (' + day(c) + ')' : '')))),
+    btn);
+}
+
+async function renderDelete() {                            // two stages: confirm it was you, then (after seeing your data) confirm deletion
+  const s = cfg.settings;
+  const final = params.get('stage') === 'final';
+  document.title = 'Delete my data';
+  if (/^#[0-9a-f]{3,8}$/i.test(s.brand_color)) document.documentElement.style.setProperty('--ac', s.brand_color);
+  const label = final ? 'Yes, delete my data' : 'Yes, I asked to delete my data';
+  const msg = el('div', { id: 'msg', role: 'status' });
+  const btn = el('button', { type: 'button', textContent: label });
+  btn.onclick = async () => {
+    btn.disabled = true; btn.textContent = 'Working…'; msg.className = ''; msg.textContent = '';
+    const res = await fetch(ENDPOINT, { method: 'POST', body: JSON.stringify({ tenant: TENANT, action: final ? 'delete_final' : 'delete_confirm',
+      r: params.get('r') || '', x: params.get('x') || '', s: params.get('s') || '' }) })
+      .then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
+    if (res.ok) { app.replaceChildren(el('h1', { textContent: final ? 'Your data has been deleted' : 'Check your email' }), el('p', { textContent: res.message })); return; }
+    if (res.error === 'used') {
+      app.replaceChildren(el('h1', { textContent: final ? 'Already deleted' : 'Already confirmed' }),
+        el('p', { textContent: final ? 'Your data has already been deleted.' : 'This request has already been confirmed. Check your email for the next step.' }));
+      return;
+    }
+    msg.className = 'err';
+    msg.textContent = res.error === 'expired' ? 'This link is invalid or has expired. Please make your request again.' :
+      res.error === 'busy' ? 'Too many attempts. Please try again later.' : 'Something went wrong. Please try again.';
+    btn.disabled = false; btn.textContent = label;
+  };
+  app.replaceChildren(el('h1', { textContent: final ? 'Delete my data' : 'Confirm your request' }),
+    el('p', { textContent: final
+      ? 'This removes your details and takes you off our mailing lists. We may keep minimal records if the law requires it. This cannot be undone.'
+      : 'Confirm that you asked ' + s.client_name + ' to delete your data. We will then email you a copy of your data and one last link to confirm.' }),
+    btn, msg);
 }
 
 async function renderChoices() {                          // opened from the Unsubscribe link in every email
