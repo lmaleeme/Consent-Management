@@ -33,7 +33,7 @@ td input[type=text],td select,td textarea{margin:0}
 <body>
 <main id="app"><p class="mut">Loading…</p></main>
 <script>
-const ENDPOINT = 'https://huirphsvtugedvcqjdlp.supabase.co';       // https://<project-ref>.supabase.co/functions/v1/api
+const ENDPOINT = 'https://huirphsvtugedvcqjdlp.supabase.co/functions/v1/api';       // https://<project-ref>.supabase.co/functions/v1/api
 const TENANT = new URLSearchParams(location.search).get('t') || '';
 const LIMIT_NOTE = 'To protect your information, each email address can make up to 3 requests an hour. If you reach the limit, you can try again in about an hour.';
 let SKEW = 0;                                              // server clock minus this device's clock, so a wrong device clock cannot trip the bot check
