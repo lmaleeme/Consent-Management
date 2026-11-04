@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<!-- NewCo admin portal, step 1: sign in with MFA, then members and the access log.
+     Two edits needed below: SUPABASE_URL and PUBLISHABLE_KEY. The publishable key is public by design; never put a secret key in this file. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; connect-src https://*.supabase.co; img-src data:; base-uri 'none'; form-action 'none'">
+<title>NewCo admin</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1a1a1a;--mut:#666;--bd:#d0d0d0;--ac:#1F3864;--err:#b00020;--ok:#1b6e3a}
+@media (prefers-color-scheme:dark){:root{--bg:#141414;--fg:#eee;--mut:#aaa;--bd:#444;--ac:#4a73c4;--err:#ff6b6b;--ok:#6fcf97}}
+body{font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg);margin:0}
+main{max-width:900px;margin:0 auto;padding:24px 16px}
+h1{font-size:22px;margin:0 0 8px}h2{font-size:17px;margin:28px 0 8px}
+label{display:block;font-weight:600;margin:12px 0 4px}
+input,select{width:100%;box-sizing:border-box;padding:10px;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--bd);border-radius:8px}
+button{padding:10px 16px;font:inherit;font-weight:600;color:#fff;background:var(--ac);border:0;border-radius:8px;cursor:pointer;margin-top:14px}
+button.plain{background:transparent;color:var(--fg);border:1px solid var(--bd);margin:0;padding:6px 10px;font-weight:400}
+button:disabled{opacity:.6;cursor:default}
+form{max-width:420px}form.wide{max-width:none}
+.err{color:var(--err);font-weight:600}.ok{color:var(--ok);font-weight:600}.mut{color:var(--mut);font-size:14px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.top button{margin:0}
+.wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}.row>div{flex:1;min-width:150px}.row button{margin:0}
+.qr{width:200px;height:200px;background:#fff;padding:8px;border-radius:8px}
+code{word-break:break-all}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+const SUPABASE_URL = 'https://huirphsvtugedvcqjdlp.supabase.co';          // https://<project-ref>.supabase.co
+const PUBLISHABLE_KEY = 'sb_publishable_t0xOUx__TzGIozt0YQ5A3A_ZCrossPC';     // your project's publishable key (public by design)
+const ADMIN_API = SUPABASE_URL + '/functions/v1/admin';
+
+const app = document.getElementById('app');
+const el = (tag, props = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) { if (k.startsWith('aria-')) e.setAttribute(k, v); else e[k] = v; }   // aria-* must be real attributes for screen readers
+  kids.flat().forEach(k => { if (k != null && k !== false) e.append(k); });
+  return e;
+};
+const say = (...kids) => app.replaceChildren(...kids);
+const LABEL = { newco_super: 'NewCo super admin', newco_support: 'NewCo support', client_admin: 'Client admin', client_staff: 'Client staff' };
+let sb;
+
+function viewLogin(note) {
+  const email = el('input', { type: 'email', autocomplete: 'username', required: true });
+  const pw = el('input', { type: 'password', autocomplete: 'current-password', required: true });
+  const msg = el('p', { className: 'err', role: 'alert', textContent: note || '' });
+  const btn = el('button', { type: 'submit', textContent: 'Sign in' });
+  const form = el('form', {}, el('h1', { textContent: 'NewCo admin' }), el('p', { className: 'mut', textContent: 'Everything you do here is recorded.' }),
+    el('label', { textContent: 'Email' }), email, el('label', { textContent: 'Password' }), pw, btn, msg);
+  form.onsubmit = async ev => {
+    ev.preventDefault(); btn.disabled = true; msg.textContent = '';
+    const { error } = await sb.auth.signInWithPassword({ email: email.value.trim(), password: pw.value });
+    if (error) { msg.textContent = 'Sign-in failed. Check your email and password.'; btn.disabled = false; return; }   // same message for every failure
+    afterAuth();
+  };
+  say(form);
+}
+
+// After a password sign-in the session is only "aal1". The portal needs "aal2": a code from the authenticator app.
+async function afterAuth() {
+  const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (aal && aal.currentLevel === 'aal2') return dash();
+  const { data: f } = await sb.auth.mfa.listFactors();
+  const factor = f && f.totp && f.totp[0];
+  return factor ? viewCode(factor.id, false) : viewEnroll();
+}
+
+function viewCode(factorId, enrolling, qr, secret) {
+  const code = el('input', { type: 'text', inputMode: 'numeric', autocomplete: 'one-time-code', maxLength: 6, required: true });
+  const msg = el('p', { className: 'err', role: 'alert' });
+  const btn = el('button', { type: 'submit', textContent: 'Verify' });
+  const form = el('form', {}, el('h1', { textContent: enrolling ? 'Set up your authenticator app' : 'Enter your code' }),
+    enrolling ? el('p', { textContent: 'Scan this with an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password), then type the 6-digit code it shows.' }) : el('p', { textContent: 'Open your authenticator app and type the 6-digit code for NewCo admin.' }),
+    enrolling ? el('img', { className: 'qr', src: qr, alt: 'QR code for your authenticator app' }) : null,
+    enrolling ? el('p', { className: 'mut' }, 'Cannot scan? Type this key into the app instead: ', el('code', { textContent: secret })) : null,
+    el('label', { textContent: '6-digit code' }), code, btn, msg,
+    el('button', { type: 'button', className: 'plain', textContent: 'Cancel', onclick: signOut }));
+  form.onsubmit = async ev => {
+    ev.preventDefault(); btn.disabled = true; msg.textContent = '';
+    const { error } = await sb.auth.mfa.challengeAndVerify({ factorId, code: code.value.trim() });
+    if (error) { msg.textContent = 'That code did not work. Wait for the next one and try again.'; btn.disabled = false; return; }
+    afterAuth();
+  };
+  say(form);
+}
+
+async function viewEnroll() {
+  say(el('p', { textContent: 'Preparing…' }));
+  const { data: f } = await sb.auth.mfa.listFactors();
+  for (const x of (f && f.all) || []) if (x.status === 'unverified') await sb.auth.mfa.unenroll({ factorId: x.id });   // clear any abandoned attempt
+  const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'NewCo admin' });
+  if (error) return viewLogin('Could not start MFA setup. Please try again.');
+  viewCode(data.id, true, data.totp.qr_code, data.totp.secret);
+}
+
+async function signOut() { await sb.auth.signOut(); viewLogin(); }
+
+async function api(action, params = {}, body) {
+  const { data } = await sb.auth.getSession();
+  const token = data && data.session && data.session.access_token;
+  const url = body ? ADMIN_API : ADMIN_API + '?' + new URLSearchParams({ a: action, ...params }).toString();
+  const res = await fetch(url, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + token, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify({ action, ...body }) : undefined });
+  return res.json().catch(() => ({ ok: false, error: 'server' }));
+}
+
+async function dash() {
+  say(el('p', { textContent: 'Loading…' }));
+  const me = await api('whoami');
+  if (!me.ok) {
+    if (me.error === 'forbidden') return say(el('h1', { textContent: 'No access' }), el('p', { textContent: 'You are signed in, but this login has no role in the portal. Ask NewCo to give you one.' }), el('button', { textContent: 'Sign out', onclick: signOut }));
+    return viewLogin(me.error === 'mfa_required' ? 'Please sign in again and complete the code step.' : 'Please sign in again.');
+  }
+  const canMembers = ['newco_super', 'client_admin'].includes(me.role);
+  const canLog = ['newco_super', 'newco_support', 'client_admin'].includes(me.role);
+  const newco = ['newco_super', 'newco_support'].includes(me.role);
+  const scope = el('select', { 'aria-label': 'Client' }, newco ? el('option', { value: 'all', textContent: 'All clients' }) : null,
+    me.tenants.map(t => el('option', { value: t.slug, textContent: t.name })));
+  const membersBox = el('div'), logBox = el('div'), msg = el('p', { role: 'status' });
+  const flash = (text, bad) => { msg.className = bad ? 'err' : 'ok'; msg.textContent = text; };
+  const table = (heads, rows) => el('div', { className: 'wrap' }, el('table', {}, el('thead', {}, el('tr', {}, heads.map(h => el('th', { textContent: h })))), el('tbody', {}, rows)));
+
+  async function loadMembers() {
+    const r = await api('members', { tenant: scope.value });
+    if (!r.ok) return membersBox.replaceChildren(el('p', { className: 'err', textContent: 'You cannot view members for this selection.' }));
+    membersBox.replaceChildren(table(['Email', 'Role', 'Client', ''], r.rows.map(m => el('tr', {},
+      el('td', { textContent: m.email }), el('td', { textContent: LABEL[m.role] || m.role }), el('td', { textContent: m.tenant || 'All clients' }),
+      el('td', {}, el('button', { type: 'button', className: 'plain', textContent: 'Remove', onclick: () => remove(m) }))))));
+  }
+  async function loadLog() {
+    const r = await api('access_log', { tenant: scope.value, limit: 100 });
+    if (!r.ok) return logBox.replaceChildren(el('p', { className: 'err', textContent: 'You cannot view the access log for this selection.' }));
+    logBox.replaceChildren(table(['When (UTC)', 'Who', 'Role', 'Client', 'Action', 'Result', 'Rows', 'Detail'], r.rows.map(a => el('tr', {},
+      el('td', { textContent: String(a.ts).slice(0, 19).replace('T', ' ') }), el('td', { textContent: a.email }), el('td', { textContent: LABEL[a.role] || a.role }),
+      el('td', { textContent: a.tenant || '' }), el('td', { textContent: a.action }), el('td', { textContent: a.outcome, className: a.outcome === 'denied' ? 'err' : '' }),
+      el('td', { textContent: String(a.rows) }), el('td', { textContent: a.detail })))));
+  }
+  const refresh = async () => { if (canMembers) await loadMembers(); if (canLog) await loadLog(); };
+  async function remove(m) {
+    if (!window.confirm('Remove ' + m.email + ' (' + (LABEL[m.role] || m.role) + ')?')) return;
+    const r = await api('member_remove', {}, { id: m.id });
+    flash(r.ok ? 'Removed.' : r.error === 'last_super' ? 'This is the last NewCo super admin and cannot be removed.' : 'You are not allowed to do that.', !r.ok);
+    refresh();
+  }
+
+  const roles = me.role === 'newco_super' ? ['client_staff', 'client_admin', 'newco_support', 'newco_super'] : ['client_staff'];
+  const aEmail = el('input', { type: 'email', required: true, 'aria-label': 'Email of the person' });
+  const aRole = el('select', { 'aria-label': 'Role' }, roles.map(r => el('option', { value: r, textContent: LABEL[r] })));
+  const aTenant = el('select', { 'aria-label': 'Client for this role' }, me.tenants.map(t => el('option', { value: t.slug, textContent: t.name })));
+  const syncTenant = () => { const isNewco = aRole.value.startsWith('newco_'); aTenant.disabled = isNewco; };
+  aRole.onchange = syncTenant; syncTenant();
+  const addForm = el('form', { className: 'wide' }, el('div', { className: 'row' },
+    el('div', {}, el('label', { textContent: 'Email (they need a login first)' }), aEmail),
+    el('div', {}, el('label', { textContent: 'Role' }), aRole), el('div', {}, el('label', { textContent: 'Client' }), aTenant),
+    el('button', { type: 'submit', textContent: 'Add' })));
+  addForm.onsubmit = async ev => {
+    ev.preventDefault();
+    const body = { email: aEmail.value.trim(), role: aRole.value };
+    if (!aRole.value.startsWith('newco_')) body.tenant = aTenant.value;
+    const r = await api('member_add', {}, body);
+    const why = { no_such_user: 'That person needs a login first. Ask NewCo to create it.', exists: 'They already have this role.', bad_request: 'Please check the details.', forbidden: 'You are not allowed to do that.' };
+    flash(r.ok ? 'Added.' : why[r.error] || 'Something went wrong. Please try again.', !r.ok);
+    if (r.ok) aEmail.value = '';
+    refresh();
+  };
+  scope.onchange = refresh;
+
+  say(el('div', { className: 'top' }, el('div', {}, el('h1', { textContent: 'NewCo admin' }),
+      el('p', { className: 'mut', textContent: 'Signed in as ' + me.email + ' · ' + (LABEL[me.role] || me.role) })),
+      el('button', { type: 'button', className: 'plain', textContent: 'Sign out', onclick: signOut })),
+    el('label', { textContent: 'Client' }), scope, msg,
+    canMembers ? el('h2', { textContent: 'Members' }) : null, canMembers ? membersBox : null, canMembers ? addForm : null,
+    canLog ? el('h2', { textContent: 'Access log' }) : null, canLog ? logBox : null,
+    el('p', { className: 'mut', textContent: 'Everything you do here is recorded in the access log, including refused attempts.' }));
+  syncTenant();
+  refresh();
+}
+
+(async () => {
+  if (/PASTE_/.test(SUPABASE_URL + PUBLISHABLE_KEY)) return say(el('p', { textContent: 'Set SUPABASE_URL and PUBLISHABLE_KEY at the top of this file.' }));
+  sb = window.supabase.createClient(SUPABASE_URL, PUBLISHABLE_KEY, { auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: true } });   // session ends when the tab closes
+  const { data } = await sb.auth.getSession();
+  if (data && data.session) afterAuth(); else viewLogin();
+})();
+</script>
+</body>
+</html>
