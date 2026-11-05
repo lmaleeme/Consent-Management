@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<!-- NewCo admin portal, step 1: sign in with MFA, then members and the access log.
+<!-- NewCo admin portal, steps 1 and 2: sign in with MFA, then health, members and the access log.
      Two edits needed below: SUPABASE_URL and PUBLISHABLE_KEY. The publishable key is public by design; never put a secret key in this file. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; connect-src https://*.supabase.co; img-src data:; base-uri 'none'; form-action 'none'">
 <title>NewCo admin</title>
@@ -13,7 +13,7 @@
 @media (prefers-color-scheme:dark){:root{--bg:#141414;--fg:#eee;--mut:#aaa;--bd:#444;--ac:#4a73c4;--err:#ff6b6b;--ok:#6fcf97}}
 body{font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg);margin:0}
 main{max-width:900px;margin:0 auto;padding:24px 16px}
-h1{font-size:22px;margin:0 0 8px}h2{font-size:17px;margin:28px 0 8px}
+h1{font-size:22px;margin:0 0 8px}h2{font-size:17px;margin:28px 0 8px}h3{font-size:15px;margin:18px 0 6px}
 label{display:block;font-weight:600;margin:12px 0 4px}
 input,select{width:100%;box-sizing:border-box;padding:10px;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--bd);border-radius:8px}
 button{padding:10px 16px;font:inherit;font-weight:600;color:#fff;background:var(--ac);border:0;border-radius:8px;cursor:pointer;margin-top:14px}
@@ -125,7 +125,7 @@ async function dash() {
   const newco = ['newco_super', 'newco_support'].includes(me.role);
   const scope = el('select', { 'aria-label': 'Client' }, newco ? el('option', { value: 'all', textContent: 'All clients' }) : null,
     me.tenants.map(t => el('option', { value: t.slug, textContent: t.name })));
-  const membersBox = el('div'), logBox = el('div'), msg = el('p', { role: 'status' });
+  const healthBox = el('div'), membersBox = el('div'), logBox = el('div'), msg = el('p', { role: 'status' });
   const flash = (text, bad) => { msg.className = bad ? 'err' : 'ok'; msg.textContent = text; };
   const table = (heads, rows) => el('div', { className: 'wrap' }, el('table', {}, el('thead', {}, el('tr', {}, heads.map(h => el('th', { textContent: h })))), el('tbody', {}, rows)));
 
@@ -144,7 +144,36 @@ async function dash() {
       el('td', { textContent: a.tenant || '' }), el('td', { textContent: a.action }), el('td', { textContent: a.outcome, className: a.outcome === 'denied' ? 'err' : '' }),
       el('td', { textContent: String(a.rows) }), el('td', { textContent: a.detail })))));
   }
-  const refresh = async () => { if (canMembers) await loadMembers(); if (canLog) await loadLog(); };
+  const when = iso => iso ? String(iso).slice(0, 16).replace('T', ' ') + ' UTC' : 'never';
+  const sum = o => Object.values(o || {}).reduce((a, b) => a + Number(b), 0);
+  const chip = hl => el('span', { className: hl.status === 'ok' ? 'ok' : 'err', textContent: hl.status === 'ok' ? 'OK' : 'Needs attention' });
+  const kv = (title, pairs) => [el('h3', { textContent: title }), table(['Item', 'Value'], pairs.map(p => el('tr', {}, el('td', { textContent: p[0] }), el('td', { textContent: String(p[1]) }))))];
+  const n = (o, k) => (o && o[k]) || 0;
+  async function loadHealth() {
+    const r = await api('monitor', { tenant: scope.value });
+    if (!r.ok) return healthBox.replaceChildren(el('p', { className: 'err', textContent: 'You cannot view health for this selection.' }));
+    if (scope.value === 'all') {
+      return healthBox.replaceChildren(table(['Client', 'Status', 'Last ledger check', 'Events (24h)', 'Open requests', 'Warnings (7d)'], r.tenants.map(t => el('tr', {},
+        el('td', { textContent: t.name }), el('td', {}, chip(t.health)), el('td', { textContent: when(t.anchor.last_ok_at) }), el('td', { textContent: String(t.ledger.last24h) }),
+        el('td', { textContent: String(sum(t.requests.open)) }), el('td', { textContent: String(sum(t.events_7d)) })))),
+        el('p', { className: 'mut', textContent: 'Choose a client above for the detail.' }));
+    }
+    const t = r.tenants[0];
+    if (!t) return healthBox.replaceChildren(el('p', { textContent: 'Nothing to show.' }));
+    healthBox.replaceChildren(
+      el('p', {}, chip(t.health), t.health.reasons.length ? ' ' : '', el('span', { textContent: t.health.reasons.join(' · ') })),
+      ...kv('Ledger check', [['Last clean check', when(t.anchor.last_ok_at)], ['Events at that check', t.anchor.events == null ? 'n/a' : t.anchor.events], ['Last failed check', when(t.anchor.last_failed_at)]]),
+      ...kv('Ledger activity', [['Total events', t.ledger.total], ['Last 24 hours', t.ledger.last24h], ['Last 7 days', t.ledger.last7d],
+        ...Object.entries(t.ledger.by_action_7d || {}).map(([k, v]) => ['  ' + k + ' (7 days)', v])]),
+      ...kv('People', [['With details held', t.people.active], ['Erased', t.people.erased]]),
+      el('h3', { textContent: 'Choices' }), table(['Purpose', 'Active', 'Withdrawn'], t.choices.map(c => el('tr', {}, el('td', { textContent: c.purpose }), el('td', { textContent: String(c.active) }), el('td', { textContent: String(c.withdrawn) })))),
+      ...kv('Requests (last 30 days)', [['Downloads', n(t.requests.last30d, 'access')], ['Corrections', n(t.requests.last30d, 'correct')], ['Deletions', n(t.requests.last30d, 'delete')],
+        ['Waiting for the person to confirm', sum(t.requests.open)]]),
+      ...kv('Configuration', [['Version', t.config.version || 'n/a'], ['Last changed', when(t.config.changed_at)], ['Problems', t.config.problems.length ? t.config.problems.join(' ') : 'None']]),
+      ...kv('Warnings (last 7 days)', [['Emails that failed to send', n(t.events_7d, 'email_failed')], ['Requests held back by the limits', n(t.events_7d, 'rate_limited')],
+        ['Automated submissions dropped', n(t.events_7d, 'bot_dropped')], ['Server errors', n(t.events_7d, 'server_error')]]));
+  }
+  const refresh = async () => { await loadHealth(); if (canMembers) await loadMembers(); if (canLog) await loadLog(); };
   async function remove(m) {
     if (!window.confirm('Remove ' + m.email + ' (' + (LABEL[m.role] || m.role) + ')?')) return;
     const r = await api('member_remove', {}, { id: m.id });
@@ -178,6 +207,7 @@ async function dash() {
       el('p', { className: 'mut', textContent: 'Signed in as ' + me.email + ' · ' + (LABEL[me.role] || me.role) })),
       el('button', { type: 'button', className: 'plain', textContent: 'Sign out', onclick: signOut })),
     el('label', { textContent: 'Client' }), scope, msg,
+    el('h2', { textContent: 'Health' }), healthBox,
     canMembers ? el('h2', { textContent: 'Members' }) : null, canMembers ? membersBox : null, canMembers ? addForm : null,
     canLog ? el('h2', { textContent: 'Access log' }) : null, canLog ? logBox : null,
     el('p', { className: 'mut', textContent: 'Everything you do here is recorded in the access log, including refused attempts.' }));
